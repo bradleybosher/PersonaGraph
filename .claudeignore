@@ -1,0 +1,37 @@
+# --- Version control ---
+.git/
+
+# --- Python artifacts ---
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Node / frontend bulk ---
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# --- Build output ---
+dist/
+build/
+
+# --- Lock files (large, low signal) ---
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# --- Logs and temp ---
+*.log
+*.bat
+*.txt
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+.idea/
