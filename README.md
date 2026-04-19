@@ -54,7 +54,7 @@ CV and job description sit in a cached system block (~2–4k tokens). A 5-minute
 | `mock` | Graph, state, SSE wiring — zero API calls | $0 |
 | `ollama` | SSE rendering with a live stream (llama3.2:3b) | $0 |
 | `haiku` | Prompt quality and evaluation accuracy | ~$0.01/session |
-| `sonnet` | Extended thinking, full debrief experience | ~$0.10/session |
+| `sonnet` | Extended thinking, full debrief experience | ~$0.50/session |
 
 The `MODEL_TIER` environment variable is a single switch that changes the entire model routing. Most demos cannot test their graphs without burning credits; this one can.
 
