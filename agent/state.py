@@ -6,10 +6,11 @@ def _add_messages(left: list[dict], right: list[dict]) -> list[dict]:
     return left + right
 
 
-class Hypothesis(TypedDict):
-    signal: str   # "strong" | "adequate" | "weak" | "unknown"
+class Hypothesis(TypedDict, total=False):
+    signal: str        # "strong" | "adequate" | "weak" | "unknown"
     confidence: float  # 0.0 – 1.0
     notes: str
+    last_updated_turn: int  # turn index when this hypothesis was last touched; stale if absent
 
 
 class JudgeVerdict(TypedDict):
@@ -37,6 +38,7 @@ class InterviewState(TypedDict):
     cv_text: str                                      # parsed CV plain text (cacheable)
     jd_text: str                                      # parsed JD plain text (cacheable)
     policy_context: str                               # RAG-retrieved hiring policy snippets (scope+sensitivity filtered)
+    guardrail_events: list[dict]                      # turns blocked by pre-graph guardrails; surfaced in debrief
 
 
 def initial_state(
@@ -64,4 +66,5 @@ def initial_state(
         cv_text=cv_text,
         jd_text=jd_text,
         policy_context=policy_context,
+        guardrail_events=[],
     )

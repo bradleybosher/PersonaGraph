@@ -38,6 +38,8 @@ router = APIRouter()
 
 # In-memory session store (sufficient for demo)
 _sessions: dict[str, InterviewState] = {}
+# Per-session locks; prevents concurrent writes from double-submits / network retries
+_session_locks: dict[str, asyncio.Lock] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +222,7 @@ async def create_session(body: CreateSessionRequest) -> StreamingResponse:
         policy_context=policy_context,
     )
     _sessions[session_id] = state
+    _session_locks[session_id] = asyncio.Lock()
 
     async def generate() -> AsyncGenerator[str]:
         # First event: session metadata
@@ -240,10 +243,23 @@ async def submit_answer(session_id: str, body: AnswerRequest) -> StreamingRespon
     if state.get("interview_complete"):
         raise HTTPException(status_code=400, detail="Interview already complete")
 
+    lock = _session_locks.get(session_id)
+    if lock is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if lock.locked():
+        raise HTTPException(status_code=409, detail="A turn is already in progress for this session")
+
     # Guardrail check — screens for prompt injection and data exfiltration attempts.
     # If flagged, return a safe refusal as an SSE stream without invoking the graph.
     guard = detect_exfiltration_attempt(body.answer)
     if guard["flagged"]:
+        # Record the blocked turn in state so debrief can account for it.
+        current = _sessions.get(session_id)
+        if current is not None:
+            events = list(current.get("guardrail_events", []))
+            events.append({"reason": guard["reason"], "input_snippet": body.answer[:120]})
+            _sessions[session_id] = {**current, "guardrail_events": events}
+
         async def guardrail_response() -> AsyncGenerator[str]:
             yield _sse({
                 "type": "guardrail",
@@ -252,11 +268,16 @@ async def submit_answer(session_id: str, body: AnswerRequest) -> StreamingRespon
             })
         return StreamingResponse(guardrail_response(), media_type="text/event-stream")
 
-    user_message = {"role": "user", "content": body.answer}
+    # Strip delimiter tokens before wrapping — prevents tag-escape injection
+    # where an answer ending with </candidate_answer> would close the wrapper early.
+    stripped_answer = body.answer.replace("<candidate_answer>", "").replace("</candidate_answer>", "")
+    safe_answer = f"<candidate_answer>\n{stripped_answer}\n</candidate_answer>"
+    user_message = {"role": "user", "content": safe_answer}
 
     async def generate() -> AsyncGenerator[str]:
-        async for chunk in _run_and_stream(session_id, state, user_message=user_message):
-            yield chunk
+        async with lock:
+            async for chunk in _run_and_stream(session_id, state, user_message=user_message):
+                yield chunk
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

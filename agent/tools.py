@@ -37,7 +37,7 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "update_hypotheses",
         "description": (
             "Store your updated mental model of the candidate after evaluating an answer. "
-            "Provide the full hypotheses dict — it replaces the previous one."
+            "Provide only the competencies you want to update — others are merged/preserved."
         ),
         "input_schema": {
             "type": "object",
@@ -134,14 +134,63 @@ _EVALUATION_SCHEMA = {
     "required": ["score", "signals", "gaps", "confidence", "summary"],
 }
 
+_CLASSIFICATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "classification": {
+            "type": "string",
+            "enum": ["answered", "clarification_request", "off_topic", "refusal"],
+        },
+        "reason": {"type": "string"},
+    },
+    "required": ["classification", "reason"],
+}
+
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
+
+def _classify_answer(question: str, answer: str, model_tier: str) -> str:
+    """Classify the candidate's answer before scoring to catch off-topic / clarification turns.
+
+    Returns one of: "answered", "clarification_request", "off_topic", "refusal".
+    Skipped for mock/ollama adapters (returns "answered" directly).
+    """
+    if get_adapter(model_tier) is not None:
+        return "answered"
+
+    prompt = (
+        "Given the interview question and the candidate's response below, classify the response.\n\n"
+        f"Question: {question}\n\n"
+        f"Response: {answer}\n\n"
+        "Choose:\n"
+        "  answered            — the candidate genuinely attempted to answer the question\n"
+        "  clarification_request — the candidate is asking for clarification or to have the question repeated\n"
+        "  off_topic           — the response does not address the question at all\n"
+        "  refusal             — the candidate explicitly refuses or declines to answer\n\n"
+        "Return only the classification and a one-sentence reason."
+    )
+    result = call_structured(prompt, _CLASSIFICATION_SCHEMA, model=get_anthropic_model("evaluation"))
+    return result.get("classification", "answered")
+
 
 def evaluate_answer(question: str, answer: str, model_tier: str) -> dict:
     adapter = get_adapter(model_tier)
     if adapter:
         return adapter.complete("evaluate_answer", question=question, answer=answer)
+
+    classification = _classify_answer(question, answer, model_tier)
+    if classification != "answered":
+        # Return a sentinel result; the tool_node will not mutate hypotheses for this record.
+        return {
+            "score": None,
+            "signals": [],
+            "gaps": [],
+            "confidence": "low",
+            "summary": f"Answer not scored: classified as '{classification}'.",
+            "classification": classification,
+            "skipped": True,
+        }
 
     prompt = (
         "You are evaluating a candidate for the role described in the job specification.\n\n"
@@ -150,7 +199,10 @@ def evaluate_answer(question: str, answer: str, model_tier: str) -> dict:
         "Score this answer on a 10-point scale. Identify specific positive signals and gaps. "
         "Be objective and specific — avoid vague praise."
     )
-    return call_structured(prompt, _EVALUATION_SCHEMA, model=get_anthropic_model("evaluation"))
+    result = call_structured(prompt, _EVALUATION_SCHEMA, model=get_anthropic_model("evaluation"))
+    result["classification"] = "answered"
+    result["skipped"] = False
+    return result
 
 
 def judge_evaluation(question: str, answer: str, evaluation: dict, model_tier: str) -> dict | None:
@@ -167,14 +219,47 @@ def judge_evaluation(question: str, answer: str, evaluation: dict, model_tier: s
     return call_structured(prompt, _JUDGE_SCHEMA, model=get_anthropic_model("judge"))
 
 
+_VALID_COMPETENCIES = frozenset([
+    "leadership", "technical_depth", "agentic_systems",
+    "customer_empathy", "strategic_thinking",
+])
+_VALID_SIGNALS = frozenset(["strong", "adequate", "weak", "unknown"])
+
+
 def update_hypotheses(hypotheses: dict | str, model_tier: str) -> dict:
-    """No sub-model call — the interviewer LLM provides the update directly."""
+    """No sub-model call — the interviewer LLM provides delta updates directly.
+
+    Validates and sanitises input; returns only the accepted delta so the caller
+    can merge it into the existing hypotheses rather than replacing the full dict.
+    """
     if isinstance(hypotheses, str):
         try:
             hypotheses = json.loads(hypotheses)
         except (json.JSONDecodeError, ValueError):
             return {}
-    return hypotheses if isinstance(hypotheses, dict) else {}
+    if not isinstance(hypotheses, dict):
+        return {}
+
+    sanitised: dict = {}
+    for key, value in hypotheses.items():
+        if key not in _VALID_COMPETENCIES:
+            continue  # silently drop unknown competency keys
+        if not isinstance(value, dict):
+            continue
+        signal = value.get("signal", "unknown")
+        if signal not in _VALID_SIGNALS:
+            signal = "unknown"
+        try:
+            confidence = float(value.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))  # clamp to [0, 1]
+        sanitised[key] = {
+            "signal": signal,
+            "confidence": confidence,
+            "notes": str(value.get("notes", "")),
+        }
+    return sanitised
 
 
 def generate_question(category: str, depth: str, rationale: str, model_tier: str) -> str:

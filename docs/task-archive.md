@@ -133,3 +133,19 @@
 - Confirmed tool call order, evaluation rubric calibration, and hypothesis update format all behave correctly with real model
 
 ---
+
+## Session 8 — Quality verification scripts + Phase 4: Sonnet polish
+
+**Completed:**
+
+- Ran `scripts/score_calibration.py` — Haiku vs Sonnet score calibration verified
+- Ran `scripts/hypothesis_trace.py` — hypothesis coherence confirmed across a full session
+- Ran `scripts/adversarial_test.py` — adversarial answer detection validated
+- Ran end-to-end sessions with `MODEL_TIER=sonnet` and reviewed:
+  - Extended thinking content rendered correctly in the thinking panel
+  - Strategic adaptation (category shifts, early termination) behaving correctly
+  - Deep-dive question quality confirmed high
+  - Debrief specificity and evidence quality confirmed
+- Verified prompt caching active (cache read tokens visible in Anthropic dashboard from turn 2 onward)
+
+---

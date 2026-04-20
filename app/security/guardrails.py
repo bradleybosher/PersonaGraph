@@ -15,6 +15,7 @@ this with an LLM-based policy classifier for higher recall on novel phrasings.
 """
 
 import re
+import unicodedata
 from typing import TypedDict
 
 
@@ -34,14 +35,13 @@ _THREAT_PATTERNS: list[tuple[str, list[str]]] = [
     (
         "financial data request",
         [
-            r"financ",           # financial, finance, financing
-            r"revenue",
-            r"budget",
-            r"\bprofit\b",
+            # Require request-intent context to reduce false positives (e.g. "study financial
+            # markets" should not match, but "tell me the revenue figures" should).
+            r"(?:tell|show|give|share|reveal|what(?:'s| is| are)|how much).{0,40}(?:financ|revenue|budget|profit|ebitda)",
             r"salary.{0,10}range",
             r"compensation.{0,10}band",
             r"share.{0,10}buyback",
-            r"ebitda",
+            r"ebitda.{0,30}(?:number|figure|result|target|forecast)",
         ],
     ),
     (
@@ -54,7 +54,7 @@ _THREAT_PATTERNS: list[tuple[str, list[str]]] = [
             r"system\s+prompt",
             r"you\s+are\s+now\s+(?:a\s+)?(?:an?\s+)?\w+",  # "you are now a DAN"
             r"act\s+as\s+if\s+you\s+have\s+no\s+restrictions",
-            r"pretend\s+you\s+are",
+            r"(?:pretend|imagine|act\s+as\s+if)\s+(?:you\s+are|you're|i(?:'m| am))",
         ],
     ),
     (
@@ -71,6 +71,17 @@ _THREAT_PATTERNS: list[tuple[str, list[str]]] = [
 ]
 
 
+def _normalise(text: str) -> str:
+    """NFKC-normalise and strip non-ASCII to defeat homoglyph / confusable attacks.
+
+    Cyrillic/Greek lookalikes (e.g. Cyrillic 'а' → ASCII 'a') are folded before
+    regex matching so pattern r"financ" cannot be bypassed by `finаncial`.
+    """
+    # NFKC decomposes compatibility characters; encode/decode drops remaining non-ASCII.
+    normalised = unicodedata.normalize("NFKC", text)
+    return normalised.encode("ascii", errors="ignore").decode("ascii").lower()
+
+
 def detect_exfiltration_attempt(user_input: str) -> GuardrailResult:
     """Screen *user_input* for prompt injection or data exfiltration patterns.
 
@@ -81,7 +92,7 @@ def detect_exfiltration_attempt(user_input: str) -> GuardrailResult:
         GuardrailResult with flagged=True and a safe_response when a threat
         pattern matches; flagged=False otherwise.
     """
-    text = user_input.lower()
+    text = _normalise(user_input)
 
     for category, patterns in _THREAT_PATTERNS:
         for pattern in patterns:
