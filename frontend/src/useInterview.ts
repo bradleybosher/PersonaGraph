@@ -141,6 +141,14 @@ export function useInterview(modelTier: ModelTier) {
         setState(s => ({ ...s, isStreaming: false, isComplete: true }))
         break
 
+      case 'guardrail':
+        setState(s => ({
+          ...s,
+          isStreaming: false,
+          messages: [...s.messages, { kind: 'guardrail', content: event.content }],
+        }))
+        break
+
       case 'error':
         setState(s => ({ ...s, error: event.message, isStreaming: false }))
         break

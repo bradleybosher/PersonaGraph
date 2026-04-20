@@ -19,6 +19,7 @@ export type SSEEvent =
   | { type: 'tool_call'; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; name: string; output: unknown }
   | { type: 'question'; content: string; meta: { category: string; depth: string; questions_remaining: number } }
+  | { type: 'guardrail'; reason: string; content: string }
   | { type: 'debrief_start' }
   | { type: 'debrief'; content: string }
   | { type: 'done' }
@@ -55,9 +56,15 @@ export interface DebriefMessage {
   content: string
 }
 
+export interface GuardrailMessage {
+  kind: 'guardrail'
+  content: string
+}
+
 export type ChatMessage =
   | ThinkingMessage
   | ToolCallMessage
   | QuestionMessage
   | AnswerMessage
   | DebriefMessage
+  | GuardrailMessage

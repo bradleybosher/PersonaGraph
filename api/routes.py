@@ -29,6 +29,10 @@ except ImportError:
 from agent.graph import interview_graph
 from agent.state import InterviewState, initial_state
 from api.keepalive import cancel_keepalive, schedule_keepalive
+from app.context.internal_docs import ALL_DOCS
+from app.context.retriever import retrieve_policy_context
+from app.security.guardrails import detect_exfiltration_attempt
+from app.security.sensitivity import INTERVIEWER_PERSONA, filter_by_sensitivity
 
 router = APIRouter()
 
@@ -196,11 +200,24 @@ async def create_session(body: CreateSessionRequest) -> StreamingResponse:
     session_id = str(uuid.uuid4())
     tier = body.model_tier or os.getenv("MODEL_TIER", "mock")
 
+    # RAG pipeline — runs once at session creation; result is stored in state and
+    # injected into the cached static system block for the duration of the session.
+    # Step 1: retrieve — scope gate enforced inside (corporate docs excluded)
+    raw_docs = retrieve_policy_context(
+        f"{body.cv_text} {body.jd_text}", ALL_DOCS
+    )
+    # Step 2: filter — drop any docs above the interviewer's clearance level
+    allowed_docs = filter_by_sensitivity(raw_docs, INTERVIEWER_PERSONA)
+    policy_context = "\n\n".join(
+        f"[{d['title']}]\n{d['text']}" for d in allowed_docs
+    )
+
     state = initial_state(
         candidate=body.candidate.model_dump(),
         model_tier=tier,
         cv_text=body.cv_text,
         jd_text=body.jd_text,
+        policy_context=policy_context,
     )
     _sessions[session_id] = state
 
@@ -222,6 +239,18 @@ async def submit_answer(session_id: str, body: AnswerRequest) -> StreamingRespon
 
     if state.get("interview_complete"):
         raise HTTPException(status_code=400, detail="Interview already complete")
+
+    # Guardrail check — screens for prompt injection and data exfiltration attempts.
+    # If flagged, return a safe refusal as an SSE stream without invoking the graph.
+    guard = detect_exfiltration_attempt(body.answer)
+    if guard["flagged"]:
+        async def guardrail_response() -> AsyncGenerator[str]:
+            yield _sse({
+                "type": "guardrail",
+                "reason": guard["reason"],
+                "content": guard["safe_response"],
+            })
+        return StreamingResponse(guardrail_response(), media_type="text/event-stream")
 
     user_message = {"role": "user", "content": body.answer}
 

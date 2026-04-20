@@ -43,6 +43,26 @@ Routing by task rather than by role reduces cost by ~5–10× over a single-mode
 
 After Haiku scores each answer, a Sonnet judge adversarially reviews the evaluation before it influences the interviewer's hypothesis updates. Four checks: signal accuracy, gap fairness, score calibration, confidence validity. If the judge flags a material flaw, the adjusted score takes precedence. Every evaluation has a paired critique stored in state and visible in the debrief.
 
+### Controlled RAG with document scoping
+
+The interviewer system prompt is augmented with retrieved hiring policy snippets at session
+creation time. Three design constraints make this enterprise-grade rather than naive RAG:
+
+- **Scope isolation** — retrieval only searches `scope="interview_system"` documents. Corporate
+  finance, legal, and other internal docs exist in the same store but are structurally
+  unreachable by the interview pipeline (`app/context/retriever.py`).
+- **Clearance filtering** — each document carries a sensitivity level (`public`, `confidential`,
+  `restricted`). The interviewer persona has `clearance="confidential"`, so restricted documents
+  are filtered out before the prompt is built, regardless of keyword relevance
+  (`app/security/sensitivity.py`).
+- **Exfiltration guardrails** — every candidate answer is screened for financial data requests,
+  instruction-injection patterns, and restricted-access attempts before the graph runs. Flagged
+  inputs return a `guardrail` SSE event with a safe refusal without touching the LLM
+  (`app/security/guardrails.py`).
+
+The retrieved context is injected into the **cached** static system block, so retrieval cost is
+paid once per session, not once per turn.
+
 ### Prompt caching with keep-alive
 
 CV and job description sit in a cached system block (~2–4k tokens). A 5-minute keep-alive loop refreshes the ephemeral cache TTL while the candidate is composing. Without this, a 6-minute pause silently evicts the cache and doubles input-token cost for the rest of the session. Every API call logs `cache_read_input_tokens` and `cache_hit_ratio` so caching is verifiable, not assumed.
@@ -84,6 +104,14 @@ api/
   routes.py       # /session and /session/{id}/answer endpoints
   keepalive.py    # Cache keep-alive loop
   logging_config.py
+
+app/
+  context/
+    internal_docs.py   # PolicyDocument model + document store (scope + sensitivity metadata)
+    retriever.py       # Scope-constrained keyword retrieval
+  security/
+    sensitivity.py     # Clearance-based document filtering
+    guardrails.py      # Input screening for injection / exfiltration attempts
 
 frontend/src/
   App.tsx         # Root, routing between intake and chat

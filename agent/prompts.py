@@ -17,14 +17,17 @@ COMPETENCIES = [
 # ---------------------------------------------------------------------------
 
 
-def build_static_prompt(cv_text: str, jd_text: str) -> str:
+def build_static_prompt(cv_text: str, jd_text: str, policy_context: str = "") -> str:
     """Return the static portion of the system prompt (JD + CV + invariant instructions).
 
     Placed in a cached system block — nothing here changes across turns.
     Includes role/tool instructions so the block reliably exceeds the 2048-token
     minimum required for Sonnet/Haiku cache writes.
+
+    policy_context is retrieved once at session creation (RAG + sensitivity filter)
+    and injected here so it rides the cached block — no re-retrieval per turn.
     """
-    return (
+    base = (
         f"ROLE BEING INTERVIEWED FOR:\n{jd_text}\n\n"
         f"CANDIDATE CV:\n{cv_text}\n\n"
         "---\n"
@@ -44,6 +47,15 @@ def build_static_prompt(cv_text: str, jd_text: str) -> str:
         "  - You may call generate_question without evaluate_answer if you're asking a follow-up.\n"
         "  - Call end_interview instead of generate_question when done — do not do both."
     )
+
+    if policy_context:
+        base += (
+            "\n\n---\n"
+            "HIRING POLICY CONTEXT (internal use only — do not quote directly to the candidate):\n"
+            + policy_context
+        )
+
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -183,4 +195,8 @@ def build_system_prompt(state: InterviewState) -> str:
     Used by mock and ollama adapters. The real Anthropic path uses
     build_static_prompt() + build_dynamic_prompt() as separate cached blocks.
     """
-    return build_static_prompt(state["cv_text"], state["jd_text"]) + "\n\n" + build_dynamic_prompt(state)
+    return (
+        build_static_prompt(state["cv_text"], state["jd_text"], state.get("policy_context", ""))
+        + "\n\n"
+        + build_dynamic_prompt(state)
+    )

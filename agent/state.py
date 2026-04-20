@@ -36,9 +36,16 @@ class InterviewState(TypedDict):
     debrief: Optional[str]                            # final report, set at end
     cv_text: str                                      # parsed CV plain text (cacheable)
     jd_text: str                                      # parsed JD plain text (cacheable)
+    policy_context: str                               # RAG-retrieved hiring policy snippets (scope+sensitivity filtered)
 
 
-def initial_state(candidate: dict, model_tier: str, cv_text: str = "", jd_text: str = "") -> InterviewState:
+def initial_state(
+    candidate: dict,
+    model_tier: str,
+    cv_text: str = "",
+    jd_text: str = "",
+    policy_context: str = "",
+) -> InterviewState:
     return InterviewState(
         messages=[],
         candidate=candidate,
@@ -56,4 +63,5 @@ def initial_state(candidate: dict, model_tier: str, cv_text: str = "", jd_text: 
         debrief=None,
         cv_text=cv_text,
         jd_text=jd_text,
+        policy_context=policy_context,
     )

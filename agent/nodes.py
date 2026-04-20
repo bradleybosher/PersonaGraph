@@ -114,7 +114,7 @@ async def interviewer_node(state: InterviewState, config: RunnableConfig | None 
     # System prompt split into two blocks: static (JD + CV + invariant instructions, cached)
     # and dynamic (hypotheses, history — changes each turn, not cached).
     # cache_control is only set when the static block meets the 2048-token minimum.
-    static_text = build_static_prompt(state["cv_text"], state["jd_text"])
+    static_text = build_static_prompt(state["cv_text"], state["jd_text"], state.get("policy_context", ""))
     static_block: dict[str, Any] = {"type": "text", "text": static_text}
     if _should_cache(static_text):
         static_block["cache_control"] = {"type": "ephemeral"}

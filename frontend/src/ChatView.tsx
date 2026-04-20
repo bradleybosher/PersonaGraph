@@ -147,6 +147,17 @@ export function ChatView({
                 </div>
               )
 
+            case 'guardrail':
+              return (
+                <div key={i} className="message interviewer guardrail-message">
+                  <div className="message-meta">
+                    <span className="meta-role">System</span>
+                    <span className="meta-category">⚠ Request blocked</span>
+                  </div>
+                  <p className="message-body">{msg.content}</p>
+                </div>
+              )
+
             case 'debrief':
               return (
                 <div key={i} className="debrief-card">
