@@ -27,7 +27,3 @@ LangGraph handles graph orchestration. `anthropic.Anthropic()` is called directl
 cd frontend && npm run dev
 # → http://localhost:5173
 ```
-## Next Session
-
-1. Run linter
-
